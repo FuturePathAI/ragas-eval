@@ -220,40 +220,58 @@ class InMemoryDocumentStore(DocumentStore):
         nodes_to_extract = {}
 
         # get embeddings for the docs
-        executor = Executor(
-            desc="embedding nodes",
-            keep_progress_bar=False,
+        executors = [Executor(
+            desc="embedding nodes 0",
+            keep_progress_bar=True,
             raise_exceptions=True,
-        )
+        )]
         result_idx = 0
+        max_parallel_process = 50
         for i, n in enumerate(nodes):
             if n.embedding is None:
                 nodes_to_embed.update({i: result_idx})
-                executor.submit(
+                executors[-1].submit(
                     self.embeddings.embed_text,
                     n.page_content,
                     name=f"embed_node_task[{i}]",
                 )
+                if result_idx % max_parallel_process == max_parallel_process - 1:
+                    executors.append(Executor(
+                                desc=f"embedding nodes {len(executors)}",
+                                keep_progress_bar=True,
+                                raise_exceptions=True,
+                            ))
                 result_idx += 1
 
             if n.keyphrases == []:
                 nodes_to_extract.update({i: result_idx})
-                executor.submit(
+                executors[-1].submit(
                     self.extractor.extract,
                     n,
                     name=f"keyphrase-extraction[{i}]",
                 )
+                if result_idx % max_parallel_process == max_parallel_process - 1:
+                    executors.append(Executor(
+                                desc=f"embedding nodes {len(executors)}",
+                                keep_progress_bar=True,
+                                raise_exceptions=True,
+                            ))
                 result_idx += 1
 
-        results = executor.results()
-        if results == []:
+        total_results = []
+        print("Total embedding workflows: ", len(executors))
+        for executor in executors:
+            results = executor.results()
+            total_results += results
+
+        if total_results == []:
             raise ExceptionInRunner()
 
         for i, n in enumerate(nodes):
             if i in nodes_to_embed.keys():
-                n.embedding = results[nodes_to_embed[i]]
+                n.embedding = total_results[nodes_to_embed[i]]
             if i in nodes_to_extract.keys():
-                keyphrases = results[nodes_to_extract[i]]
+                keyphrases = total_results[nodes_to_extract[i]]
                 n.keyphrases = keyphrases
 
             if n.embedding is not None and n.keyphrases != []:

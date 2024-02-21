@@ -17,9 +17,9 @@ class RunConfig:
     Configuration for a timeouts and retries.
     """
 
-    timeout: int = 60
+    timeout: int = 600
     max_retries: int = 10
-    max_wait: int = 60
+    max_wait: int = 600
     exception_types: t.Union[
         t.Type[BaseException],
         t.Tuple[t.Type[BaseException], ...],
@@ -28,7 +28,7 @@ class RunConfig:
 
 def add_retry(fn: WrappedFn, run_config: RunConfig) -> WrappedFn:
     r = Retrying(
-        wait=wait_random_exponential(multiplier=1, max=run_config.max_wait),
+        wait=wait_random_exponential(multiplier=2, max=run_config.max_wait),
         stop=stop_after_attempt(run_config.max_retries),
         retry=retry_if_exception_type(run_config.exception_types),
         reraise=True,
@@ -41,7 +41,7 @@ def add_async_retry(fn: WrappedFn, run_config: RunConfig) -> WrappedFn:
     Decorator for retrying a function if it fails.
     """
     r = AsyncRetrying(
-        wait=wait_random_exponential(multiplier=1, max=run_config.max_wait),
+        wait=wait_random_exponential(multiplier=2, max=run_config.max_wait),
         stop=stop_after_attempt(run_config.max_retries),
         reraise=True,
     )

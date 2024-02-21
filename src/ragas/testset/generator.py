@@ -4,6 +4,7 @@ import logging
 import typing as t
 from dataclasses import dataclass
 from random import choices
+import pickle
 
 import pandas as pd
 from datasets import Dataset
@@ -39,6 +40,37 @@ logger = logging.getLogger(__name__)
 Distributions = t.Dict[t.Any, float]
 DEFAULT_DISTRIBUTION = {simple: 0.5, reasoning: 0.25, multi_context: 0.25}
 
+
+# from langchain.embeddings import AzureOpenAIEmbeddings
+# from langchain.chat_models import AzureChatOpenAI
+from langchain_openai import AzureChatOpenAI
+from langchain_openai import AzureOpenAIEmbeddings
+
+# model_type = 'azure'
+model_type = 'openai'
+
+if model_type == 'openai':
+    model_def = ChatOpenAI(model='gpt-4')
+    embeddings_def = OpenAIEmbeddings(model="text-embedding-ada-002")
+
+else:
+    model_def = AzureChatOpenAI(
+            api_key='0af33f2fcade4c6ab6120299c61e9940',
+            api_version='2023-05-15',
+            deployment_name='chat',
+            model='gpt-4',
+            azure_endpoint='https://cog-2o7x3ehmzkvdg.openai.azure.com//',
+            openai_api_type='azure',
+        )
+    embeddings_def = AzureOpenAIEmbeddings(
+            api_key='0af33f2fcade4c6ab6120299c61e9940',
+            api_version='2023-05-15',
+            deployment='embedding',
+            model='text-embedding-ada-002',
+            azure_endpoint='https://cog-2o7x3ehmzkvdg.openai.azure.com/',
+            openai_api_type='azure',
+        )
+        
 
 @dataclass
 class TestDataset:
@@ -79,11 +111,10 @@ class TestsetGenerator:
         docstore: t.Optional[DocumentStore] = None,
         chunk_size: int = 512,
     ) -> "TestsetGenerator":
-        generator_llm_model = LangchainLLMWrapper(ChatOpenAI(model=generator_llm))
-        critic_llm_model = LangchainLLMWrapper(ChatOpenAI(model=critic_llm))
-        embeddings_model = LangchainEmbeddingsWrapper(
-            OpenAIEmbeddings(model=embeddings)
-        )
+        print(f"Using {model_type}")
+        generator_llm_model = LangchainLLMWrapper(model_def)
+        critic_llm_model = LangchainLLMWrapper(model_def)
+        embeddings_model = LangchainEmbeddingsWrapper(embeddings_def)
         keyphrase_extractor = KeyphraseExtractor(llm=generator_llm_model)
         if docstore is None:
             from langchain.text_splitter import TokenTextSplitter
@@ -136,6 +167,19 @@ class TestsetGenerator:
 
     # if you add any arguments to this function, make sure to add them to
     # generate_with_langchain_docs as well
+
+    def create_langchain_docs(
+        self, 
+        documents: t.Sequence[LCDocument], 
+        save_path
+    ):
+        self.docstore.add_documents(
+            [Document.from_langchain_document(doc) for doc in documents]
+        )
+        with open(save_path, 'wb') as file:
+            pickle.dump((self.docstore.nodes, self.docstore.node_map, self.docstore.node_embeddings_list), file)
+
+
     def generate_with_langchain_docs(
         self,
         documents: t.Sequence[LCDocument],
@@ -150,6 +194,28 @@ class TestsetGenerator:
         self.docstore.add_documents(
             [Document.from_langchain_document(doc) for doc in documents]
         )
+
+        return self.generate(
+            test_size=test_size,
+            distributions=distributions,
+            with_debugging_logs=with_debugging_logs,
+            is_async=is_async,
+            raise_exceptions=raise_exceptions,
+            run_config=run_config,
+        )
+
+    def generate_with_saved_embeddings(
+        self,
+        save_path: str,
+        test_size: int,
+        distributions: Distributions = {},
+        with_debugging_logs=False,
+        is_async: bool = True,
+        raise_exceptions: bool = True,
+        run_config: t.Optional[RunConfig] = None,
+    ):
+        with open(save_path, 'wb') as file:
+            self.docstore.nodes, self.docstore.node_map, self.docstore.node_embeddings_list = pickle.load(file)
 
         return self.generate(
             test_size=test_size,
@@ -192,7 +258,7 @@ class TestsetGenerator:
 
         # configure run_config for docstore
         if run_config is None:
-            run_config = RunConfig(max_retries=15, max_wait=90)
+            run_config = RunConfig(max_retries=15, max_wait=600)
         self.docstore.set_run_config(run_config)
 
         # init filters and evolutions
@@ -209,11 +275,12 @@ class TestsetGenerator:
             patch_logger("ragas.testset.docstore", logging.DEBUG)
             patch_logger("ragas.llms.prompt", logging.DEBUG)
 
-        exec = Executor(
-            desc="Generating",
-            keep_progress_bar=True,
-            raise_exceptions=raise_exceptions,
-        )
+        execs = [Executor(
+                    desc="Generating_0",
+                    keep_progress_bar=True,
+                    raise_exceptions=raise_exceptions,
+                )]
+        max_parallel_process = 10
 
         current_nodes = [
             CurrentNodes(root_node=n, nodes=[n])
@@ -222,35 +289,55 @@ class TestsetGenerator:
         total_evolutions = 0
         for evolution, probability in distributions.items():
             for i in range(round(probability * test_size)):
-                exec.submit(
+                execs[-1].submit(
                     evolution.evolve,
                     current_nodes[i],
                     name=f"{evolution.__class__.__name__}-{i}",
                 )
+                if total_evolutions % max_parallel_process == max_parallel_process - 1:
+                    execs.append(
+                        Executor(
+                            desc=f"Generating_{len(execs)}",
+                            keep_progress_bar=True,
+                            raise_exceptions=raise_exceptions,
+                        )
+                    )
                 total_evolutions += 1
         if total_evolutions <= test_size:
             filler_evolutions = choices(
                 list(distributions), k=test_size - total_evolutions
             )
             for evolution in filler_evolutions:
-                exec.submit(
+                execs[-1].submit(
                     evolution.evolve,
                     current_nodes[total_evolutions],
                     name=f"{evolution.__class__.__name__}-{total_evolutions}",
                 )
+                if total_evolutions % max_parallel_process == max_parallel_process - 1:
+                    execs.append(
+                        Executor(
+                            desc=f"Generating_{len(execs)}",
+                            keep_progress_bar=True,
+                            raise_exceptions=raise_exceptions,
+                        )
+                    )
                 total_evolutions += 1
 
         try:
-            test_data_rows = exec.results()
-            if test_data_rows == []:
+            total_test_data_rows = []
+            print("Total generation workflows: ", len(execs))
+            for exec in execs:
+                test_data_rows = exec.results()
+                total_test_data_rows += test_data_rows
+            if total_test_data_rows == []:
                 raise ExceptionInRunner()
 
         except ValueError as e:
             raise e
         # make sure to ignore any NaNs that might have been returned
         # due to failed evolutions. MaxRetriesExceeded is a common reason
-        test_data_rows = [r for r in test_data_rows if not is_nan(r)]
-        test_dataset = TestDataset(test_data=test_data_rows)
+        total_test_data_rows = [r for r in total_test_data_rows if not is_nan(r)]
+        test_dataset = TestDataset(test_data=total_test_data_rows)
         evol_lang = [get_feature_language(e) for e in distributions]
         evol_lang = [e for e in evol_lang if e is not None]
         track(

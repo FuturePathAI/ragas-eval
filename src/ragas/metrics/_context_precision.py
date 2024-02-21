@@ -18,7 +18,10 @@ logger = logging.getLogger(__name__)
 
 CONTEXT_PRECISION = Prompt(
     name="context_precision",
-    instruction="""Given question, answer and context verify if the context was useful in arriving at the given answer. Give verdict as "1" if useful and "0" if not with json output. """,
+    instruction="""Given question, answer and context verify if the context was useful in arriving at the given answer. 
+                    Give verdict as "1" if useful and "0" if not with json output. If the answer does
+                    not contain any information. The verdict is "0". Make sure the output is a 
+                    dictionary with keys "reason" and "verdict" as shown in the examples""",
     examples=[
         {
             "question": """What can you tell me about albert Albert Einstein?""",
@@ -95,12 +98,30 @@ class ContextPrecision(MetricWithLLM):
         json_responses = [
             item if isinstance(item, dict) else {} for item in json_responses
         ]
+
+        # verdict_list = []
+        # for resp in json_responses:
+        #     if resp.get("verdict"):
+        #         verdict_list.append(int("1" == resp.get("verdict", "").strip()))
+            
+        #     elif resp.get("verification"):
+        #         resp_tmp = resp.get("verification")
+        #         if resp_tmp.get("verdict"):
+        #             verdict_list.append(int("1" == resp_tmp.get("verdict", "").strip()))
+            
+        #         else:
+        #             verdict_list.append(np.nan)
+            
+        #     else:
+        #         verdict_list.append(np.nan)
+
         verdict_list = [
             int("1" == resp.get("verdict", "").strip())
             if resp.get("verdict")
             else np.nan
             for resp in json_responses
         ]
+
         denominator = sum(verdict_list) + 1e-10
         numerator = sum(
             [
@@ -139,6 +160,7 @@ class ContextPrecision(MetricWithLLM):
             for item in responses
         ]
         json_responses = t.cast(t.List[t.Dict], json_responses)
+        print(json_responses)
         score = self._calculate_average_precision(json_responses)
         return score
 

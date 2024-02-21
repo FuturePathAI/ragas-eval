@@ -119,6 +119,7 @@ def evaluate(
     'answer_relevancy': 0.874}
     ```
     """
+    print("Custom ragas evaluation")
     if dataset is None:
         raise ValueError("Provide dataset!")
 

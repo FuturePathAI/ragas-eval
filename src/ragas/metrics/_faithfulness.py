@@ -55,7 +55,7 @@ LONG_FORM_ANSWER_PROMPT = Prompt(
 
 NLI_STATEMENTS_MESSAGE = Prompt(
     name="nli_statements",
-    instruction="Natural language inference. Use only 'Yes' (1), 'No' (0) and 'Null' (-1) as verdict.",
+    instruction="Natural language inference. Use only 'Yes' (1), 'No' (0) and 'Null' (-1) as verdict. Make sure the output is a list of dictionaries with keys \"statement_{{number}}\", \"reason\", \"verdict\" as shown in the examples",
     examples=[
         {
             "context": """John is a student at XYZ University. He is pursuing a degree in Computer Science. He is enrolled in several courses this semester, including Data Structures, Algorithms, and Database Management. John is a diligent student and spends a significant amount of time studying and completing assignments. He often stays late in the library to work on his projects.""",
@@ -152,6 +152,28 @@ class Faithfulness(MetricWithLLM):
         # check the verdicts and compute the score
         verdict_score_map = {"1": 1, "0": 0, "null": np.nan}
         output = output if isinstance(output, list) else [output]
+        print(output)
+
+        ### Modified approach
+        
+        # verdict_list = []
+        # for statement_with_validation in output:
+        #     if "verdict" in statement_with_validation.keys():
+        #         verdict_list.append(statement_with_validation.get("verdict", "").lower())
+        #     elif "statement_1" in statement_with_validation.keys():
+        #         for key in statement_with_validation.keys():
+        #             if "statement_" in key:
+        #                 verdict_list.append(statement_with_validation[key].get("verdict", "").lower())
+        #     else:
+        #         verdict_list.append(np.nan)
+
+        # faithful_statements = sum(
+        #                 verdict_score_map.get(verdict, np.nan)
+        #                 for verdict in verdict_list)
+        # num_statements = len(verdict_list)
+
+        ### Original approach
+
         faithful_statements = sum(
             verdict_score_map.get(
                 statement_with_validation.get("verdict", "").lower(), np.nan
@@ -159,6 +181,7 @@ class Faithfulness(MetricWithLLM):
             for statement_with_validation in output
         )
         num_statements = len(output)
+        
         if num_statements:
             score = faithful_statements / num_statements
         else:
