@@ -5,6 +5,7 @@ import typing as t
 from abc import abstractmethod
 from dataclasses import dataclass, field
 
+import time
 import numpy as np
 from langchain_core.pydantic_v1 import BaseModel
 
@@ -266,16 +267,24 @@ class SimpleEvolution(Evolution):
         assert self.generator_llm is not None, "generator_llm cannot be None"
         assert self.question_filter is not None, "question_filter cannot be None"
 
+        print("Simple evolution: process start")
+        ref_time = time.time()
+
         merged_node = self.merge_nodes(current_nodes)
         passed = await self.node_filter.filter(merged_node)
+        print(f"Nodes filtered, time taken {time.time() - ref_time}")
+        ref_time = time.time()
+
         if not passed["score"]:
             nodes = self.docstore.get_random_nodes(k=1)
             new_current_nodes = CurrentNodes(root_node=nodes[0], nodes=nodes)
+            print("Score not passed, retrying")
             return await self.aretry_evolve(
                 current_tries, new_current_nodes, update_count=False
             )
 
         logger.debug("keyphrases in merged node: %s", merged_node.keyphrases)
+        ref_time =time.time()
         results = await self.generator_llm.generate(
             prompt=self.seed_question_prompt.format(
                 context=merged_node.page_content,
@@ -284,14 +293,22 @@ class SimpleEvolution(Evolution):
                 ).tolist(),
             )
         )
+
+        print(f"Generated seed question, time taken {time.time() - ref_time}")
+        ref_time = time.time()
+
         seed_question = results.generations[0][0].text
         # NOTE: might need improvement
         # select only one seed question here
         is_valid_question = await self.question_filter.filter(seed_question)
+        print(f"Checked question validity, time taken {time.time() - ref_time}")
+        ref_time = time.time()
+        
         if not is_valid_question:
             # get more context to rewrite question
             current_nodes = self._get_more_adjacent_nodes(current_nodes)
             # retry with new nodes added
+            print("invalid question, retrying")
             return await self.aretry_evolve(current_tries, current_nodes)
         else:
             # if valid question
