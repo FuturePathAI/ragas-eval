@@ -5,6 +5,7 @@ import typing as t
 from dataclasses import dataclass
 from random import choices
 import pickle
+import numpy as np
 
 import pandas as pd
 from datasets import Dataset
@@ -168,7 +169,7 @@ class TestsetGenerator:
     # if you add any arguments to this function, make sure to add them to
     # generate_with_langchain_docs as well
 
-    def create_langchain_docs(
+    def create_node_embeddings(
         self, 
         documents: t.Sequence[LCDocument], 
         save_path
@@ -179,6 +180,12 @@ class TestsetGenerator:
         with open(save_path, 'wb') as file:
             pickle.dump((self.docstore.nodes, self.docstore.node_map, self.docstore.node_embeddings_list), file)
 
+    def load_saved_embeddings(
+            self, 
+            save_path: str
+    ):
+        with open(save_path, 'rb') as file:
+            self.docstore.nodes, self.docstore.node_map, self.docstore.node_embeddings_list = pickle.load(file)
 
     def generate_with_langchain_docs(
         self,
@@ -203,29 +210,7 @@ class TestsetGenerator:
             raise_exceptions=raise_exceptions,
             run_config=run_config,
         )
-
-    def generate_with_saved_embeddings(
-        self,
-        save_path: str,
-        test_size: int,
-        distributions: Distributions = {},
-        with_debugging_logs=False,
-        is_async: bool = True,
-        raise_exceptions: bool = True,
-        run_config: t.Optional[RunConfig] = None,
-    ):
-        with open(save_path, 'wb') as file:
-            self.docstore.nodes, self.docstore.node_map, self.docstore.node_embeddings_list = pickle.load(file)
-
-        return self.generate(
-            test_size=test_size,
-            distributions=distributions,
-            with_debugging_logs=with_debugging_logs,
-            is_async=is_async,
-            raise_exceptions=raise_exceptions,
-            run_config=run_config,
-        )
-
+    
     def init_evolution(self, evolution: Evolution) -> None:
         if evolution.generator_llm is None:
             evolution.generator_llm = self.generator_llm
@@ -352,6 +337,84 @@ class TestsetGenerator:
 
         return test_dataset
 
+    def generate_single(
+        self,
+        distributions: Distributions = DEFAULT_DISTRIBUTION,
+        with_debugging_logs=False,
+        is_async: bool = True,
+        raise_exceptions: bool = True,
+        run_config: t.Optional[RunConfig] = None,
+    ):
+        # validate distributions
+        if not check_if_sum_is_close(list(distributions.values()), 1.0, 3):
+            raise ValueError(
+                f"distributions passed do not sum to 1.0 [got {sum(list(distributions.values()))}]. Please check the distributions."
+            )
+
+        # configure run_config for docstore
+        if run_config is None:
+            run_config = RunConfig(max_retries=15, max_wait=600)
+        self.docstore.set_run_config(run_config)
+
+        # init filters and evolutions
+        for evolution in distributions:
+            self.init_evolution(evolution)
+            evolution.init(is_async=is_async, run_config=run_config)
+
+        if with_debugging_logs:
+            from ragas.utils import patch_logger
+
+            patch_logger("ragas.testset.evolutions", logging.DEBUG)
+            patch_logger("ragas.testset.extractor", logging.DEBUG)
+            patch_logger("ragas.testset.filters", logging.DEBUG)
+            patch_logger("ragas.testset.docstore", logging.DEBUG)
+            patch_logger("ragas.llms.prompt", logging.DEBUG)
+
+        exec = Executor(
+                desc="Generating",
+                keep_progress_bar=True,
+                raise_exceptions=raise_exceptions)
+
+        current_nodes = [
+            CurrentNodes(root_node=n, nodes=[n])
+            for n in self.docstore.get_random_nodes(k=1)
+        ]
+
+        evolution = np.random.choice(list(distributions), 1, p=list(distributions.values()))[0]
+
+        exec.submit(
+            evolution.evolve,
+            current_nodes[0],
+            name=f"{evolution.__class__.__name__}-{0}",
+        )
+            
+        try:
+            test_data_rows = exec.results()
+            if test_data_rows == []:
+                raise ExceptionInRunner()
+
+        except ValueError as e:
+            raise e
+        
+        # make sure to ignore any NaNs that might have been returned
+        # due to failed evolutions. MaxRetriesExceeded is a common reason
+        test_data_rows = [r for r in test_data_rows if not is_nan(r)]
+        test_dataset = TestDataset(test_data=test_data_rows)
+        # evol_lang = [get_feature_language(e) for e in distributions]
+        # evol_lang = [e for e in evol_lang if e is not None]
+        # track(
+        #     TesetGenerationEvent(
+        #         event_type="testset_generation",
+        #         evolution_names=[e.__class__.__name__.lower() for e in distributions],
+        #         evolution_percentages=[distributions[e] for e in distributions],
+        #         num_rows=len(test_dataset.test_data),
+        #         language=evol_lang[0] if len(evol_lang) > 0 else "",
+        #     )
+        # )
+
+        return test_dataset
+
+    
     def adapt(
         self,
         language: str,

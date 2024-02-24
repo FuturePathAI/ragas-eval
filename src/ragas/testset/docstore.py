@@ -227,6 +227,7 @@ class InMemoryDocumentStore(DocumentStore):
         )]
         result_idx = 0
         max_parallel_process = 50
+        # print(f"num nodes = {len(nodes)}\n")
         for i, n in enumerate(nodes):
             if n.embedding is None:
                 nodes_to_embed.update({i: result_idx})
@@ -265,7 +266,8 @@ class InMemoryDocumentStore(DocumentStore):
             total_results += results
 
         if total_results == []:
-            raise ExceptionInRunner()
+            # raise ExceptionInRunner()
+            return
 
         for i, n in enumerate(nodes):
             if i in nodes_to_embed.keys():
