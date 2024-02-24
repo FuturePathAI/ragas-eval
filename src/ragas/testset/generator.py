@@ -47,8 +47,8 @@ DEFAULT_DISTRIBUTION = {simple: 0.5, reasoning: 0.25, multi_context: 0.25}
 from langchain_openai import AzureChatOpenAI
 from langchain_openai import AzureOpenAIEmbeddings
 
-# model_type = 'azure'
-model_type = 'openai'
+model_type = 'azure'
+# model_type = 'openai'
 
 if model_type == 'openai':
     model_def = ChatOpenAI(model='gpt-4')
@@ -210,7 +210,50 @@ class TestsetGenerator:
             raise_exceptions=raise_exceptions,
             run_config=run_config,
         )
+
+    def generate_with_saved_embeddings(
+        self,
+        save_path: str,
+        test_size: int,
+        distributions: Distributions = {},
+        with_debugging_logs=False,
+        is_async: bool = True,
+        raise_exceptions: bool = True,
+        run_config: t.Optional[RunConfig] = None,
+    ):
+        with open(save_path, 'rb') as file:
+            self.docstore.nodes, self.docstore.node_map, self.docstore.node_embeddings_list = pickle.load(file)
+
+        return self.generate(
+            test_size=test_size,
+            distributions=distributions,
+            with_debugging_logs=with_debugging_logs,
+            is_async=is_async,
+            raise_exceptions=raise_exceptions,
+            run_config=run_config,
+        )
     
+    def load_saved_embeddings(self, save_path):
+        with open(save_path, 'rb') as file:
+            self.docstore.nodes, self.docstore.node_map, self.docstore.node_embeddings_list = pickle.load(file)
+
+    async def filter_nodes_test(self, evolution):
+        self.evolution = evolution
+        self.init_evolution(self.evolution)
+
+        # self.passed_nodes = []
+        # save_path = f"/home/nithin/fp/ai-rag-chat-evaluator/scripts/data-generator/nodes.pkl"
+
+        # for i in [75, 84, 88,75, 84, 88,75, 84, 88,75, 84, 88]:
+        for i in range(100,200):
+            n = self.docstore.nodes[i]
+            passed = await self.evolution.node_filter.filter(n)
+            print(i, passed['score'])
+            # if passed['score']:
+            #     self.passed_nodes.append(i)
+            #     with open(save_path, 'wb') as file:
+            #         pickle.dump(self.passed_nodes, file)
+
     def init_evolution(self, evolution: Evolution) -> None:
         if evolution.generator_llm is None:
             evolution.generator_llm = self.generator_llm
@@ -335,6 +378,45 @@ class TestsetGenerator:
             )
         )
 
+        return test_dataset
+    
+    def generate_single(self, evolution):
+        
+        run_config = RunConfig(max_retries=15, max_wait=600)
+        self.docstore.set_run_config(run_config)
+
+        self.init_evolution(evolution)
+        evolution.init(is_async=True, run_config=run_config)
+
+        exec = Executor(
+                    desc="Generating",
+                    keep_progress_bar=True,
+                    raise_exceptions=True,
+                )
+        
+        current_nodes = [
+            CurrentNodes(root_node=n, nodes=[n])
+            for n in self.docstore.get_random_nodes(k=1)
+        ]
+
+        print("Submitting to exec")
+
+        exec.submit(
+                    evolution.evolve,
+                    current_nodes[0],
+                    name=f"{evolution.__class__.__name__}-{0}",
+                )
+        
+        try:
+            print("Getting exec results")
+            test_data_rows = exec.results()
+            if test_data_rows == []:
+                raise ExceptionInRunner()
+        except ValueError as e:
+            raise e
+        
+        test_data_rows = [r for r in test_data_rows if not is_nan(r)]
+        test_dataset = TestDataset(test_data=test_data_rows)
         return test_dataset
 
     def generate_single(

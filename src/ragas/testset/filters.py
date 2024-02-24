@@ -5,6 +5,7 @@ import typing as t
 from abc import ABC
 from dataclasses import dataclass, field
 
+import time
 from ragas.llms.json_load import json_loader
 from ragas.run_config import RunConfig
 from ragas.testset.prompts import (
@@ -51,9 +52,17 @@ class NodeFilter(Filter):
 
     async def filter(self, node: Node) -> t.Dict:
         prompt = self.context_scoring_prompt.format(context=node.page_content)
+        # print(f"\tStarting filter")
+        
+        # ref_time = time.time()
         results = await self.llm.generate(prompt=prompt)
+        # print(f"\tFilter: Context scoring generation, time taken: {time.time() - ref_time}")
+
+        # ref_time = time.time()
         output = results.generations[0][0].text.strip()
         score = await json_loader.safe_load(output, llm=self.llm)
+        # print(f"\tFilter: json loading, time taken: {time.time() - ref_time}")
+
         score = score if isinstance(score, dict) else {}
         logger.debug("node filter: %s", score)
         score.update({"score": score.get("score", 0) >= self.threshold})

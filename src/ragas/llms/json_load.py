@@ -124,7 +124,7 @@ class JsonLoader:
         text: str,
         llm: BaseRagasLLM,
         callbacks: Callbacks = None,
-        is_async: bool = True,
+        is_async: bool = False,
         run_config: RunConfig = RunConfig(),
     ) -> t.Union[t.Dict, t.List]:
         if is_async:

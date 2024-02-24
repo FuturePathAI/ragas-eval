@@ -82,13 +82,15 @@ class BaseRagasLLM(ABC):
         temperature: float = 1e-8,
         stop: t.Optional[t.List[str]] = None,
         callbacks: Callbacks = [],
-        is_async: bool = True,
+        is_async: bool = False,
     ) -> LLMResult:
         """Generate text using the given event loop."""
         if is_async:
+            # print("\t\tasync")
             agenerate_text_with_retry = add_async_retry(
                 self.agenerate_text, self.run_config
             )
+            # print("\t\tadded retry")
             return await agenerate_text_with_retry(
                 prompt=prompt,
                 n=n,
@@ -97,8 +99,10 @@ class BaseRagasLLM(ABC):
                 callbacks=callbacks,
             )
         else:
+            # print("\t\tno async")
             loop = asyncio.get_event_loop()
             generate_text_with_retry = add_retry(self.generate_text, self.run_config)
+            # print("\t\tadded retry")
             generate_text = partial(
                 generate_text_with_retry,
                 prompt=prompt,
@@ -134,6 +138,7 @@ class LangchainLLMWrapper(BaseRagasLLM):
         stop: t.Optional[t.List[str]] = None,
         callbacks: t.Optional[Callbacks] = None,
     ) -> LLMResult:
+        # print(f"\t\tllm generating text, multiple comp: {is_multiple_completion_supported(self.langchain_llm)}")
         temperature = self.get_temperature(n=n)
         if is_multiple_completion_supported(self.langchain_llm):
             return self.langchain_llm.generate_prompt(
