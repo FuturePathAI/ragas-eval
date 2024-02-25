@@ -390,7 +390,7 @@ class TestsetGenerator:
 
         return test_dataset
     
-    async def generate_single(self, evolution: Evolution, score_threshold: float = 4.0):
+    async def generate_single(self, evolution: Evolution, score_threshold: float = 4.0, node_index: int = None):
         
         run_config = RunConfig(max_retries=15, max_wait=600)
         self.docstore.set_run_config(run_config)
@@ -398,13 +398,16 @@ class TestsetGenerator:
         self.init_evolution(evolution)
         evolution.init(is_async=True, run_config=run_config, score_threshold=score_threshold)
 
-        current_nodes = [
-            CurrentNodes(root_node=n, nodes=[n])
-            for n in self.docstore.get_random_nodes(k=1, score_threshold=4.0)
-        ]
+        if node_index is not None:
+            assert node_index < len(self.docstore.nodes)
+            node = self.docstore.nodes[node_index]
+        else:
+            node = self.docstore.get_random_nodes(k=1, score_threshold=score_threshold)
+
+        current_node = CurrentNodes(root_node=node, nodes=[node])
 
         try:
-            test_data_row = await evolution.evolve(current_nodes[0])
+            test_data_row = await evolution.evolve(current_node)
         except Exception as e:
             raise e
         
