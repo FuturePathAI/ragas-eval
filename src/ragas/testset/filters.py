@@ -53,7 +53,7 @@ class NodeFilter(Filter):
     async def filter(self, node: Node) -> t.Dict:
         prompt = self.context_scoring_prompt.format(context=node.page_content)
         # print(f"\tStarting filter")
-        
+
         # ref_time = time.time()
         results = await self.llm.generate(prompt=prompt)
         # print(f"\tFilter: Context scoring generation, time taken: {time.time() - ref_time}")
@@ -65,7 +65,8 @@ class NodeFilter(Filter):
 
         score = score if isinstance(score, dict) else {}
         logger.debug("node filter: %s", score)
-        score.update({"score": score.get("score", 0) >= self.threshold})
+        # print("score: ", score.get("score", 0))
+        score.update({"status": score.get("score", 0) >= self.threshold})
         return score
 
     def adapt(self, language: str, cache_dir: t.Optional[str] = None) -> None:

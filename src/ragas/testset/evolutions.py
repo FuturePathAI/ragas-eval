@@ -62,6 +62,7 @@ class Evolution:
     )
     max_tries: int = 5
     is_async: bool = True
+    score_threshold: float = 0
 
     @staticmethod
     def merge_nodes(nodes: CurrentNodes) -> Node:
@@ -82,8 +83,9 @@ class Evolution:
             new_node.embedding = np.average(node_embeddings, axis=0)
         return new_node
 
-    def init(self, is_async: bool = True, run_config: t.Optional[RunConfig] = None):
+    def init(self, is_async: bool = True, run_config: t.Optional[RunConfig] = None, score_threshold: float = 0):
         self.is_async = is_async
+        self.score_threshold = score_threshold
         if run_config is None:
             run_config = RunConfig()
         self.set_run_config(run_config)
@@ -140,7 +142,7 @@ class Evolution:
                 current_nodes.nodes.append(next_adjacent_node)
             else:
                 # retry with new base node
-                nodes = self.docstore.get_random_nodes(k=1)
+                nodes = self.docstore.get_random_nodes(k=1, score_threshold=self.score_threshold)
                 return CurrentNodes(root_node=nodes[0], nodes=nodes)
         else:
             # add prev nodes in index 0
@@ -150,7 +152,7 @@ class Evolution:
 
     def _get_new_random_node(self):
         assert self.docstore is not None, "docstore cannot be None"
-        new_node = self.docstore.get_random_nodes(k=1)[0]
+        new_node = self.docstore.get_random_nodes(k=1, score_threshold=self.score_threshold)[0]
         return CurrentNodes(root_node=new_node, nodes=[new_node])
 
     async def evolve(self, current_nodes: CurrentNodes) -> DataRow:
@@ -268,27 +270,20 @@ class SimpleEvolution(Evolution):
         assert self.generator_llm is not None, "generator_llm cannot be None"
         assert self.question_filter is not None, "question_filter cannot be None"
 
-        print("Simple evolution: process start")
-        ref_time = time.time()
-
         merged_node = self.merge_nodes(current_nodes)
-        # print("### Simple evolution: start")
-        ref_time = time.time()
-        passed = await self.node_filter.filter(merged_node)
-        # print(f"Nodes filtered, time taken {time.time() - ref_time}")
-        # ref_time = time.time()
-
-        if not passed["score"]:
-            nodes = self.docstore.get_random_nodes(k=1)
-            new_current_nodes = CurrentNodes(root_node=nodes[0], nodes=nodes)
-            print("Score not passed, retrying")
-            return await self.aretry_evolve(
-                current_tries, new_current_nodes, update_count=False
-            )
+        # passed = await self.node_filter.filter(merged_node)
         
-        ref_time = time.time()
+        # if not passed["score"]:
+        #     nodes = self.docstore.get_random_nodes(k=1,score_threshold=self.score_threshold)
+        #     new_current_nodes = CurrentNodes(root_node=nodes[0], nodes=nodes)
+        #     print("Score not passed, retrying")
+        #     return await self.aretry_evolve(
+        #         current_tries, new_current_nodes, update_count=False
+        #     )
+        
+        # ref_time = time.time()
         logger.debug("keyphrases in merged node: %s", merged_node.keyphrases)
-        ref_time =time.time()
+        # ref_time =time.time()
         results = await self.generator_llm.generate(
             prompt=self.seed_question_prompt.format(
                 context=merged_node.page_content,
@@ -298,12 +293,12 @@ class SimpleEvolution(Evolution):
             )
         )
 
-        print(f"Generated seed question, time taken {time.time() - ref_time}")
-        ref_time = time.time()
+        # print(f"Generated seed question, time taken {time.time() - ref_time}")
+        # ref_time = time.time()
 
         seed_question = results.generations[0][0].text
         # print(f"seed question, time taken: {time.time() - ref_time}")
-        ref_time = time.time()
+        # ref_time = time.time()
 
         # NOTE: might need improvement
         # select only one seed question here
@@ -343,7 +338,7 @@ class ComplexEvolution(Evolution):
         default_factory=lambda: compress_question_prompt
     )
 
-    def init(self, is_async: bool = True, run_config: t.Optional[RunConfig] = None):
+    def init(self, is_async: bool = True, run_config: t.Optional[RunConfig] = None, score_threshold: float = 0):
         if run_config is None:
             run_config = RunConfig()
         super().init(is_async=is_async, run_config=run_config)
@@ -461,7 +456,7 @@ class MultiContextEvolution(ComplexEvolution):
         similar_node = self.docstore.get_similar(merged_node, top_k=1)
         if similar_node == []:
             # retry
-            new_random_nodes = self.docstore.get_random_nodes(k=1)
+            new_random_nodes = self.docstore.get_random_nodes(k=1, score_threshold=self.score_threshold)
             current_nodes = CurrentNodes(
                 root_node=new_random_nodes[0], nodes=new_random_nodes
             )

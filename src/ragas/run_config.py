@@ -17,9 +17,9 @@ class RunConfig:
     Configuration for a timeouts and retries.
     """
 
-    timeout: int = 600
+    timeout: int = 60
     max_retries: int = 10
-    max_wait: int = 600
+    max_wait: int = 60
     exception_types: t.Union[
         t.Type[BaseException],
         t.Tuple[t.Type[BaseException], ...],

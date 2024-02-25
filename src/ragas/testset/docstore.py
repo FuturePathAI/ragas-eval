@@ -101,7 +101,7 @@ class DocumentStore(ABC):
         ...
 
     @abstractmethod
-    def get_random_nodes(self, k=1) -> t.List[Node]:
+    def get_random_nodes(self, k=1, score_threshold: float = 0) -> t.List[Node]:
         ...
 
     @abstractmethod
@@ -191,6 +191,7 @@ class InMemoryDocumentStore(DocumentStore):
     nodes: t.List[Node] = field(default_factory=list)
     node_embeddings_list: t.List[Embedding] = field(default_factory=list)
     node_map: t.Dict[str, Node] = field(default_factory=dict)
+    node_scores: list = None
 
     def _embed_items(self, items: t.Union[t.Sequence[Document], t.Sequence[Node]]):
         ...
@@ -290,8 +291,14 @@ class InMemoryDocumentStore(DocumentStore):
     def get_document(self, doc_id: str) -> Node:
         raise NotImplementedError
 
-    def get_random_nodes(self, k=1) -> t.List[Node]:
-        return rng.choice(np.array(self.nodes), size=k).tolist()
+    def get_random_nodes(self, k=1, score_threshold: float = 0) -> t.List[Node]:
+        if score_threshold > 0:
+            assert self.node_scores is not None
+            idx = [i for i in range(len(self.node_scores)) if self.node_scores[i] > score_threshold]
+            idx_selected = rng.choice(np.array(idx), size=k).tolist()
+            return [self.nodes[i] for i in idx_selected]
+        else:
+            return rng.choice(np.array(self.nodes), size=k).tolist()
 
     def get_similar(
         self, node: Node, threshold: float = 0.7, top_k: int = 3
