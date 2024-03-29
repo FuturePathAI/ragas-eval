@@ -412,7 +412,7 @@ class TestsetGenerator:
             raise e
         
         if not is_nan(test_data_row):
-            return TestDataset(test_data=test_data_row)
+            return TestDataset(test_data=[test_data_row])
         else:
             return None
     

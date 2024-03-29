@@ -10,7 +10,7 @@ import time
 import numpy as np
 from langchain_core.pydantic_v1 import BaseModel
 
-from ragas.exceptions import MaxRetriesExceeded
+from ragas.exceptions import MaxRetriesExceeded, QuestionEvolutionFailed
 from ragas.llms import BaseRagasLLM
 from ragas.llms.json_load import json_loader
 from ragas.llms.prompt import Prompt
@@ -375,6 +375,7 @@ class ComplexEvolution(Evolution):
             self.__class__.__name__,
             simple_question,
         )
+        print("Simple question generated")
 
         merged_node = self.merge_nodes(current_nodes)
         result = await self.generator_llm.generate(
@@ -383,6 +384,8 @@ class ComplexEvolution(Evolution):
             )
         )
         reasoning_question = result.generations[0][0].text.strip()
+
+        print("Complex question generated")
 
         # compress the question
         compressed_question = await self._transform_question(
@@ -396,18 +399,24 @@ class ComplexEvolution(Evolution):
 
         if not await self.question_filter.filter(compressed_question):
             # retry
+            print(f"Question filtering failed. Retrying {current_tries+1}")
             current_nodes = self.se._get_more_adjacent_nodes(current_nodes)
             return await self.aretry_evolve(current_tries, current_nodes)
+        
+        print("Question filtering done")
 
         assert self.evolution_filter is not None, "evolution filter cannot be None"
         if await self.evolution_filter.filter(simple_question, compressed_question):
             # retry
+            raise QuestionEvolutionFailed
             current_nodes = self.se._get_new_random_node()
             logger.debug(
                 "evolution_filter failed, retrying with %s", len(current_nodes.nodes)
             )
+            print(f"Evolution filter failed. Retrying {current_tries+1}")
             return await self.aretry_evolve(current_tries, current_nodes)
 
+        print("Evolution filtering done")
         return reasoning_question, current_nodes
 
     def adapt(self, language: str, cache_dir: t.Optional[str] = None) -> None:

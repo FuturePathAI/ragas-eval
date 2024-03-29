@@ -35,3 +35,13 @@ class ExceptionInRunner(RagasException):
     def __init__(self):
         msg = "The runner thread which was running the jobs raised an exeception. Read the traceback above to debug it. You can also pass `raise_exception=False` incase you want to show only a warning message instead."
         super().__init__(msg)
+
+
+class QuestionEvolutionFailed(RagasException):
+    """
+    Exception is raised when the seed question and complex question are not very different
+    """
+
+    def __init__(self):
+        msg = "Exception: The complex question is not very different from seed question."
+        super().__init__(msg)
